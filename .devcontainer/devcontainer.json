@@ -1,0 +1,88 @@
+{
+	"name": "docker-robust-cbf-bnb",
+	"build": {
+        "context": "..",
+        "dockerfile": "Dockerfile",
+		"args": {
+            "NO_CACHE": "1"
+        }
+    },
+
+	// "name": "docker-alpha-beta-crown",
+	// "build": {
+    //     "context": "..",
+    //     "dockerfile": "DockerfileCrown",
+	// 	"args": {
+    //         "NO_CACHE": "1"
+    //     }
+    // },
+
+	"containerEnv": {
+        "DISPLAY": "unix:0",
+        // "ROS_LOCALHOST_ONLY": "1",
+        // "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST",
+        // "ROS_DOMAIN_ID": "42",
+        "SHELL": "/bin/bash",
+		"TZ": "America/New_York"
+    },
+	"runArgs": [
+		"--privileged",
+        "--gpus", "all",
+        "-v",
+        "/dev:/dev",
+        "-e",
+        "DISPLAY=${env:DISPLAY}",
+        "--ulimit=core=-1",
+		"--net=host",
+		"--ipc=host"
+	],
+	"mounts": [
+        "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached",
+        "source=/dev/dri,target=/dev/dri,type=bind,consistency=cached",
+        // "source=${localEnv:HOME}/template/logging/,target=/workspaces/logging,type=bind,consistency=cached",
+        "source=${localEnv:HOME}/.bash_history,target=/home/dev/.bash_history,type=bind,consistency=cached"
+    ],
+	"postCreateCommand": "cd cuda_extensions && python -m pip install . --no-cache-dir --no-build-isolation && cat /etc/os-release",
+  	"remoteUser": "root", 
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/robust-lyapunov-bnb,type=bind",
+	"workspaceFolder": "/workspaces/robust-lyapunov-bnb",
+	"customizations": {
+		"vscode": {
+			"settings": {
+                "extensions.verifySignature": false
+            },
+			"extensions": [
+				"cheshirekow.cmake-format",
+				"github.copilot",
+				"llvm-vs-code-extensions.vscode-clangd",
+				"ms-azuretools.vscode-docker",
+				// "ms-iot.vscode-ros",
+				"ms-python.black-formatter",
+				"ms-python.debugpy",
+				// "ms-python.flake8",
+				"ms-python.isort",
+				"ms-python.pylint",
+				"ms-python.python",
+				"ms-python.vscode-pylance",
+				"ms-toolsai.jupyter",
+				"ms-vscode.cmake-tools",
+				"ms-vscode.cpptools",
+				"ms-vscode.cpptools-extension-pack",
+				"ms-vscode.cpptools-themes",
+				"mutantdino.resourcemonitor",
+				"twxs.cmake",
+				"vadimcn.vscode-lldb",
+				"xaver.clang-format"
+			]
+		}
+	},
+	"forwardPorts": [
+        3000
+    ],
+    "portsAttributes": {
+        "3000": {
+            "label": "Application",
+            "onAutoForward": "notify"
+        }
+    }
+}
