@@ -1,12 +1,12 @@
-# Make sure you are using the 'devel' image as we discussed
-FROM pytorch/pytorch:2.2.1-cuda11.8-cudnn8-devel
+# Make sure you are using the 'devel' image
+FROM pytorch/pytorch:2.5.1-cuda12.1-cudnn9-devel
 
 # Use bash shell
 SHELL ["/bin/bash", "--login", "-c"]
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=non-interactive \
-    CUDA_HOME=/usr/local/cuda-11.8 \
+    CUDA_HOME=/usr/local/cuda-12.1 \
     PATH="/usr/local/bin:${CUDA_HOME}/bin:${PATH}" \
     LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}"\
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -73,16 +73,15 @@ RUN python -m pip install --no-cache-dir \
     numpy==1.26.4 \
     scipy==1.12.0 \
     torchinfo
-    
+
 # Install auto_LiRPA and alpha-beta-CROWN
 RUN git clone --recursive https://github.com/Verified-Intelligence/alpha-beta-CROWN.git \
     && cd alpha-beta-CROWN/auto_LiRPA \
-    && pip3 install -e . \
+    && python -m pip install -e . \
     && cd .. \
     && cd complete_verifier \
-    && pip3 install -r requirements.txt \
-    && cd .. \
-    && export PYTHONPATH="${PYTHONPATH}:$(pwd):$(pwd)/alpha-beta-CROWN:$(pwd)/alpha-beta-CROWN/complete_verifier"
+    && python -m pip install -r requirements.txt
+ENV PYTHONPATH="${PYTHONPATH}:/workspace/alpha-beta-CROWN:/workspace/alpha-beta-CROWN/complete_verifier:/workspace/alpha-beta-CROWN/auto_LiRPA"
 
 # Clean up
 RUN apt-get clean \

@@ -42,10 +42,10 @@
         // "source=${localEnv:HOME}/template/logging/,target=/workspaces/logging,type=bind,consistency=cached",
         "source=${localEnv:HOME}/.bash_history,target=/home/dev/.bash_history,type=bind,consistency=cached"
     ],
-	"postCreateCommand": "cd cuda_extensions && python -m pip install . --no-cache-dir --no-build-isolation && cat /etc/os-release",
+	// "postCreateCommand": "cd cuda_extensions && python -m pip install . --no-cache-dir --no-build-isolation && cat /etc/os-release",
   	"remoteUser": "root", 
-	"workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/robust-lyapunov-bnb,type=bind",
-	"workspaceFolder": "/workspaces/robust-lyapunov-bnb",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace/cbf-bnb-minimum,type=bind",
+	"workspaceFolder": "/workspace/cbf-bnb-minimum",
 	"customizations": {
 		"vscode": {
 			"settings": {
