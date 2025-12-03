@@ -1,5 +1,5 @@
 {
-	"name": "docker-robust-cbf-bnb",
+	"name": "docker-cbf-bnb",
 	"build": {
         "context": "..",
         "dockerfile": "Dockerfile",
@@ -7,15 +7,6 @@
             "NO_CACHE": "1"
         }
     },
-
-	// "name": "docker-alpha-beta-crown",
-	// "build": {
-    //     "context": "..",
-    //     "dockerfile": "DockerfileCrown",
-	// 	"args": {
-    //         "NO_CACHE": "1"
-    //     }
-    // },
 
 	"containerEnv": {
         "DISPLAY": "unix:0",
