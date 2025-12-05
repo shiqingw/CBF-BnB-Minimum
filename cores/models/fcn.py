@@ -53,6 +53,7 @@ class FullyConnectedNetwork(nn.Module):
         # Build Layers
         layers = []
         self.activation_derivatives = []
+        self.activation_second_derivatives = []
         # Loop over the number of transitions (Linear layers needed)
         # widths: [d_in, h1, h2, d_out] -> 3 transitions
         for i in range(len(widths) - 1):
@@ -63,6 +64,7 @@ class FullyConnectedNetwork(nn.Module):
             if i < len(activations):
                 layers.append(get_activation(activations[i]))
                 self.activation_derivatives.append(get_activation_der(activations[i]))
+                self.activation_second_derivatives.append(get_activation_second_der(activations[i]))
 
         self.model = nn.Sequential(*layers)
 
@@ -78,15 +80,16 @@ class FullyConnectedNetwork(nn.Module):
         """
         Computes the Jacobian using optimized Transposed Propagation.
         
-        Strategy: We propagate the TRANSPOSE of the Jacobian.
-        J_transposed shape: (Batch, In_Network_Dim, Current_Layer_Dim)
+        Strategy: Propagate the TRANSPOSE of the Jacobian (J^T).
+        J^T shape: (Batch, Network_Input_Dim, Layer_Input_Dim)
         
-        This strategy allows:
-        1. auto_LiRPA compatibility (uses standard Linear layers).
-        2. Maximum speed (uses contiguous memory access for Linear layers).
-        3. Autograd safety (uses out-of-place operations).
+        Benefits:
+        1. Compatible with auto_LiRPA (Standard Matmul/Linear structure).
+        2. Fast (Contiguous memory access).
+        3. Autograd Safe (Out-of-place operations).
         
-        Output Shape: (Batch, Out_Features, In_Features)
+        Returns:
+            J: (Batch, Out_Features, In_Features)
         """
         if x.dim() == 1:
             x = x.unsqueeze(0)
@@ -96,59 +99,43 @@ class FullyConnectedNetwork(nn.Module):
         z = (x + self.input_bias) * self.input_transform
         
         # 2. Jacobian Transpose Initialization
-        # J_0 = diag(t). J_0^T = diag(t).
-        # Shape: (Batch, In_Network, In_Network)
+        # J_0 = diag(t)  =>  J_0^T = diag(t)
+        # Create Identity and scale to get diag(t)
         eye = torch.eye(self.in_features, device=x.device, dtype=x.dtype)
         
-        # Scale columns (because it's the transpose) or rows (diagonal is same)
-        # Broadcasting: (1, In, In) * (1, In, 1) -> (1, In, In)
+        # Shape: (1, In, In)
         J_T = eye.unsqueeze(0) * self.input_transform.view(1, -1, 1)
         
-        # Expand to batch size and Clone to ensure independent gradients for batch items
+        # Expand to batch size and Clone to ensure independent gradients
         J_T = J_T.expand(batch_size, -1, -1).clone()
 
         act_index = 0
         
         for layer in self.model:
             if isinstance(layer, nn.Linear):
-                # Update State
+                # Update State: z_{l} = W z_{l-1} + b
                 z = layer(z)
                 
                 # Update Jacobian Transpose:
-                # Rule: J_new = W @ J_old
-                # Transpose: J_new^T = J_old^T @ W^T
-                # PyTorch Linear(x) computes x @ W^T.
-                # So if we pass J_old^T as input to the layer, we get J_new^T!
-                
-                # Note: We must temporarily disable bias for Jacobian prop since J is a differential
-                original_bias = layer.bias
-                layer.bias = None # Temporarily remove bias
-                
-                # Propagate
-                J_T = layer(J_T)
-                
-                # Restore bias
-                layer.bias = original_bias
-                
+                # Rule: J_{l} = W @ J_{l-1}
+                # Transpose: J_{l}^T = J_{l-1}^T @ W^T
+                J_T = torch.matmul(J_T, layer.weight.T)
+
             else:
                 # Activation Layer
                 der_func = self.activation_derivatives[act_index]
                 d_sigma = der_func(z) # Shape: (Batch, Width)
                 
-                # Update State
+                # Update State: z_{l} = sigma(z_{l})
                 z = layer(z)
                 
-                # Update Jacobian Transpose:
-                # Rule: J_new = diag(d_sigma) @ J_old
-                # Transpose: J_new^T = J_old^T @ diag(d_sigma)
-                # This corresponds to scaling the COLUMNS of J^T.
-                
-                # J^T shape: (Batch, In_Network, Current_Width)
-                # d_sigma shape: (Batch, Current_Width)
-                # We broadcast d_sigma to (Batch, 1, Current_Width) to scale columns
+                # Update Jacobian Transpose:    
+                # Rule: J_{l} = diag(d_sigma) @ J_{l-1}
+                # Transpose: J_{l}^T = J_{l-1}^T @ diag(d_sigma)
+                # Equivalent to scaling the columns of J^T
                 J_T = J_T * d_sigma.unsqueeze(1)
                 
                 act_index += 1
 
-        # Return transpose to get back to (Batch, Out_Features, In_Features)
+        # Transpose back to (Batch, Out_Features, In_Features)
         return J_T.transpose(1, 2)
