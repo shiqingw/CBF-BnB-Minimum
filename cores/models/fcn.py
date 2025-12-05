@@ -139,3 +139,86 @@ class FullyConnectedNetwork(nn.Module):
 
         # Transpose back to (Batch, Out_Features, In_Features)
         return J_T.transpose(1, 2)
+    
+    def hessian(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Computes the Hessian matrix (Second Derivative) recursively.
+        Designed for Auto_LiRPA compatibility (Avoids einsum, uses permute+matmul).
+        
+        Args:
+            x: Input tensor (Batch, In_Features)
+        Returns:
+            H: Hessian tensor (Batch, Out_Features, In_Features, In_Features)
+        """
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
+        batch_size = x.shape[0]
+
+        # --- 1. Initialization ---
+        z = (x + self.input_bias) * self.input_transform
+        
+        # J: (Batch, Layer_Dim, Input_Dim)
+        eye = torch.eye(self.in_features, device=x.device, dtype=x.dtype)
+        J = eye.unsqueeze(0) * self.input_transform.view(1, -1, 1)
+        J = J.expand(batch_size, -1, -1).clone()
+
+        # H: (Batch, Layer_Dim, Input_Dim, Input_Dim)
+        H = torch.zeros(batch_size, self.in_features, self.in_features, self.in_features, 
+                        device=x.device, dtype=x.dtype)
+
+        act_index = 0
+
+        # --- 2. Recursion ---
+        for layer in self.model:
+            if isinstance(layer, nn.Linear):
+                # --- Linear Step ---
+                # 1. Update Jacobian: J_new = W @ J
+                # Permute J to (B, N, In_Layer) to multiply W on the right
+                J_perm = J.permute(0, 2, 1) 
+                # (B, N, In_Layer) @ (In_Layer, Out_Layer) -> (B, N, Out_Layer)
+                J = torch.matmul(J_perm, layer.weight.T).permute(0, 2, 1)
+                
+                # 2. Update Hessian: H_new = W @ H
+                # We need to contract W with the channel dim (dim 1) of H.
+                # H: (B, C_in, N, N) -> Permute to (B, N, N, C_in)
+                H_perm = H.permute(0, 2, 3, 1)
+                # (B, N, N, C_in) @ (C_in, C_out) -> (B, N, N, C_out)
+                H_new = torch.matmul(H_perm, layer.weight.T)
+                # Permute back to (B, C_out, N, N)
+                H = H_new.permute(0, 3, 1, 2)
+                
+                # 3. Update Value
+                z = layer(z)
+                
+            else:
+                # --- Activation Step ---
+                d1_func = self.activation_derivatives[act_index]
+                d2_func = self.activation_second_derivatives[act_index]
+                
+                sigma_1 = d1_func(z)
+                sigma_2 = d2_func(z) if d2_func else None
+                
+                z = layer(z)
+                
+                # Update Hessian
+                # Term 1: Propagated Curvature -> sigma' * H
+                term1 = sigma_1.view(batch_size, -1, 1, 1) * H
+                
+                term2 = 0
+                if sigma_2 is not None:
+                    # Term 2: Generated Curvature -> sigma'' * (J outer J)
+                    # J is (B, L, N).
+                    # J.unsqueeze(-1) is (B, L, N, 1)
+                    # J.unsqueeze(-2) is (B, L, 1, N)
+                    # Broadcasting creates Outer Product (B, L, N, N)
+                    outer = J.unsqueeze(-1) * J.unsqueeze(-2)
+                    term2 = sigma_2.view(batch_size, -1, 1, 1) * outer
+                
+                H = term1 + term2
+                
+                # Update Jacobian: J_new = sigma' * J
+                J = sigma_1.unsqueeze(-1) * J
+                
+                act_index += 1
+                
+        return H
