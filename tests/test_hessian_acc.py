@@ -12,12 +12,17 @@ def test_hessian_correctness():
     widths = [input_dim, 8, 8, output_dim]
     activations = ['tanh', 'sigmoid']
     batch_size = 3
+
+    rand_input_bias = torch.randn(input_dim).tolist()
+    rand_input_transform = torch.randn(input_dim).tolist()
     
     net = FullyConnectedNetwork(
         in_features=input_dim,
         out_features=output_dim,
         activations=activations,
-        widths=widths
+        widths=widths,
+        input_bias=rand_input_bias,
+        input_transform=rand_input_transform
     ).to(device)
     
     # 2. Input

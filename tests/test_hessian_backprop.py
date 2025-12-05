@@ -11,12 +11,17 @@ def test_hessian_backprop():
     output_dim = 2
     widths = [input_dim, 8, output_dim]
     activations = ['tanh']
+
+    rand_input_bias = torch.randn(input_dim).tolist()
+    rand_input_transform = torch.randn(input_dim).tolist()
     
     net = FullyConnectedNetwork(
         in_features=input_dim,
         out_features=output_dim,
         activations=activations,
-        widths=widths
+        widths=widths,
+        input_bias=rand_input_bias,
+        input_transform=rand_input_transform
     ).to(device)
     
     # Enable gradients for weights (default) and input

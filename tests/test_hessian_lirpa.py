@@ -138,12 +138,17 @@ def test_auto_lirpa_hessian():
     widths = [input_dim, 8, 8, output_dim]
     activations = ['tanh', 'sigmoid']
     batch_size = 1
+
+    rand_input_bias = torch.randn(input_dim).tolist()
+    rand_input_transform = torch.randn(input_dim).tolist()
     
     # Net
     net = FullyConnectedNetwork(
         in_features=input_dim, out_features=output_dim,
         activations=activations, widths=widths,
-        layer_bias=True
+        layer_bias=True,
+        input_bias=rand_input_bias,
+        input_transform=rand_input_transform
     ).to(device)
     
     # Wrapper
