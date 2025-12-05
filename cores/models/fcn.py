@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn 
+import torch.nn.functional as F
 from typing import List, Union
 from .activation_function import get_activation, get_activation_der, get_activation_second_der, get_activation_third_der
 
@@ -54,6 +55,7 @@ class FullyConnectedNetwork(nn.Module):
         layers = []
         self.activation_derivatives = []
         self.activation_second_derivatives = []
+        self.activation_third_derivatives = []
         # Loop over the number of transitions (Linear layers needed)
         # widths: [d_in, h1, h2, d_out] -> 3 transitions
         for i in range(len(widths) - 1):
@@ -65,6 +67,7 @@ class FullyConnectedNetwork(nn.Module):
                 layers.append(get_activation(activations[i]))
                 self.activation_derivatives.append(get_activation_der(activations[i]))
                 self.activation_second_derivatives.append(get_activation_second_der(activations[i]))
+                self.activation_third_derivatives.append(get_activation_third_der(activations[i]))
 
         self.model = nn.Sequential(*layers)
 
@@ -91,8 +94,7 @@ class FullyConnectedNetwork(nn.Module):
         Returns:
             J: (Batch, Out_Features, In_Features)
         """
-        if x.dim() == 1:
-            x = x.unsqueeze(0)
+
         batch_size = x.shape[0]
 
         # 1. State Initialization
@@ -150,8 +152,7 @@ class FullyConnectedNetwork(nn.Module):
         Returns:
             H: Hessian tensor (Batch, Out_Features, In_Features, In_Features)
         """
-        if x.dim() == 1:
-            x = x.unsqueeze(0)
+
         batch_size = x.shape[0]
 
         # --- 1. Initialization ---
@@ -222,3 +223,93 @@ class FullyConnectedNetwork(nn.Module):
                 act_index += 1
                 
         return H
+
+    def derivative3(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Computes 3rd Order Derivative D3 (B, Out, N, N, N).
+        """
+        # NO DIM CHECKS - Assume (Batch, N)
+        batch_size = x.shape[0]
+        n_in = self.in_features
+
+        z = (x + self.input_bias) * self.input_transform
+        
+        eye = torch.eye(n_in, device=x.device, dtype=x.dtype)
+        J = eye.unsqueeze(0) * self.input_transform.view(1, -1, 1)
+        J = J.expand(batch_size, -1, -1).clone()
+
+        H = torch.zeros(batch_size, n_in, n_in, n_in, device=x.device, dtype=x.dtype)
+        D3 = torch.zeros(batch_size, n_in, n_in, n_in, n_in, device=x.device, dtype=x.dtype)
+
+        act_index = 0
+
+        for layer in self.model:
+            if isinstance(layer, nn.Linear):
+                # --- Linear Step ---
+                
+                # J: (B, L, N)
+                J_perm = J.permute(0, 2, 1)
+                J = torch.matmul(J_perm, layer.weight.T).permute(0, 2, 1)
+                
+                # H: (B, L, N, N) -> Permute L to last
+                H_perm = H.permute(0, 2, 3, 1)
+                H = torch.matmul(H_perm, layer.weight.T).permute(0, 3, 1, 2)
+                
+                # D3: (B, L, N, N, N) -> Permute L to last
+                D3_perm = D3.permute(0, 2, 3, 4, 1)
+                D3 = torch.matmul(D3_perm, layer.weight.T).permute(0, 4, 1, 2, 3)
+                
+                z = layer(z)
+                
+            else:
+                # --- Activation Step ---
+                d1 = self.activation_derivatives[act_index]
+                d2 = self.activation_second_derivatives[act_index]
+                d3 = self.activation_third_derivatives[act_index]
+                
+                s1 = d1(z)
+                s2 = d2(z)
+                s3 = d3(z)
+                z = layer(z) 
+                
+                # Broadcasting Views
+                # s: (B, L)
+                s_view_3d = s1.view(batch_size, -1, 1)          # For J: (B, L, N)
+                s_view_4d = s1.view(batch_size, -1, 1, 1)       # For H: (B, L, N, N)
+                s_view_5d = s1.view(batch_size, -1, 1, 1, 1)    # For D3: (B, L, N, N, N)
+                
+                s2_view_4d = s2.view(batch_size, -1, 1, 1)
+                s2_view_5d = s2.view(batch_size, -1, 1, 1, 1)
+                s3_view_5d = s3.view(batch_size, -1, 1, 1, 1)
+                
+                # --- Update D3 ---
+                # Term 1: s' * D3
+                term1 = s_view_5d * D3
+                
+                # Term 2: s'' * (J_i H_jk + J_j H_ik + J_k H_ij)
+                c1 = J.unsqueeze(-1).unsqueeze(-1) * H.unsqueeze(-3)
+                c2 = J.unsqueeze(-1).unsqueeze(-3) * H.unsqueeze(-2)
+                c3 = J.unsqueeze(-2).unsqueeze(-3) * H.unsqueeze(-1)
+                term2 = s2_view_5d * (c1 + c2 + c3)
+                    
+                # Term 3: s''' * (J_i J_j J_k)
+                j_outer_3 = J.unsqueeze(-1).unsqueeze(-1) * \
+                            J.unsqueeze(-1).unsqueeze(-3) * \
+                            J.unsqueeze(-2).unsqueeze(-3)
+                
+                term3 = s3_view_5d * j_outer_3
+                    
+                D3 = term1 + term2 + term3
+                
+                # --- Update H (Post-update) ---
+                # H_new = s' H + s'' (J outer J)
+                outer_j = J.unsqueeze(-1) * J.unsqueeze(-2) # (B, L, N, N)
+                h_term2 = s2_view_4d * outer_j
+                H = (s_view_4d * H) + h_term2
+                
+                # --- Update J ---
+                J = s_view_3d * J
+                
+                act_index += 1
+                
+        return D3
